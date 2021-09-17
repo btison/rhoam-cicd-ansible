@@ -1,0 +1,11 @@
+---
+
+uninstall_gitea_operator: false
+
+delete_gitea_operatorgroup: true
+
+delete_gitea_operator_namespace: true
+
+delete_gitea_namespace: true
+
+delete_gitea_operator_catalogsource: true
