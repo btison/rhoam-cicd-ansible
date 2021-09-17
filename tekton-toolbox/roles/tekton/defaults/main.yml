@@ -1,0 +1,18 @@
+---
+
+threescale_toolbox_secret: 3scale-toolbox
+
+tekton_task_import_openapi: threescale-import-openapi
+tekton_task_apicast_routes: threescale-apicast-routes
+tekton_pipeline_configure_api: threescale-configure-api
+pvc_tekton_pipeline_workspace: workspace-pvc
+tekton_eventlistener_configure_api: threescale-configure-api
+tekton_triggertemplate_configure_api: threescale-configure-api
+tekton_triggerbinding_configure_api: threescale-configure-api
+
+tekton_eventlistener_configure_api_service: "el-{{ tekton_eventlistener_configure_api }}"
+tekton_eventlistener_configure_api_route: "el-{{ tekton_eventlistener_configure_api }}"
+
+rolebinding_tekton_sa_edit: tekton-sa-edit
+
+threescale_toolbox_credentials: rhoam

@@ -1,0 +1,267 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  annotations:
+  name: {{ tekton_task_import_openapi }}
+spec:
+  params:
+    - name: toolboxCredentials
+      type: string
+    - name: threescaleMetadata
+      type: string
+    - name: openapiSpecDocument
+      type: string
+    - name: openshiftRouteTemplate
+      type: string
+    - name: apicastNamespace
+      type: string
+    - name: apicastServicePort
+      type: string
+    - name: apicastServiceStaging
+      type: string
+    - name: apicastServiceProduction
+      type: string
+    - name: apicastStagingRouteManifest
+      type: string
+    - name: apicastProductionRouteManifest
+      type: string
+  results:
+    - description: Name of the staging APIcast route
+      name: apicastStagingRoute
+    - description: Name of the production APIcast route
+      name: apicastProductionRoute
+  steps:
+    - env:
+        - name: THREESCALE_CLI_CONFIG
+          value: /config/.3scalerc.yaml
+      image: 'quay.io/btison/toolbox-rhel7-jq:3scale2.10'
+      name: list-services
+      resources: {}
+      script: >
+        #!/usr/bin/env bash
+
+
+        set -e
+
+
+        THREESCALE_JSON=$(workspaces.source.path)/$(params.threescaleMetadata)
+
+
+        echo "Processing 3scale metadata file $THREESCALE_JSON with contents:"
+
+        cat $THREESCALE_JSON
+
+
+        echo
+
+        echo
+
+
+        ##### Set remote URL #####
+
+
+        THREESCALE_REMOTE=$(3scale remote list | grep
+        "$(params.toolboxCredentials)")
+
+        THREESCALE_REMOTE_URL=$(echo $THREESCALE_REMOTE | awk '{print $2}' | sed
+        -E "s|(.*)://(.*)|\1|")
+
+        THREESCALE_REMOTE_URL+="://"
+
+        THREESCALE_REMOTE_URL+=$(echo $THREESCALE_REMOTE | awk '{print $3}')
+
+        THREESCALE_REMOTE_URL+="@"
+
+        THREESCALE_REMOTE_URL+=$(echo $THREESCALE_REMOTE | awk '{print $2}' |
+        sed -E "s|(.*)://(.*)|\2|")              
+
+
+        ##### Import OpenAPI spec document #####
+
+
+        OPENAPI_SPEC_DOCUMENT=$(workspaces.source.path)/$(params.openapiSpecDocument)
+
+        SYSTEM_NAME=$(jq -r '."system-name"' $THREESCALE_JSON) 
+
+        PRIVATE_BASE_URL=$(jq -r '."private-base-url"' $THREESCALE_JSON)
+
+
+        if $(jq 'has("public-basepath")' $THREESCALE_JSON) && [ $(jq
+        '."public-basepath" | length' $THREESCALE_JSON) -gt 0 ];then
+          PUBLIC_BASEPATH=$(jq -r '."public-basepath"' $THREESCALE_JSON)
+        fi
+
+
+        if $(jq 'has("staging-public-base-url")' $THREESCALE_JSON) && [ $(jq
+        '."staging-public-base-url" | length' $THREESCALE_JSON) -gt 0 ];then
+          STAGING_PUBLIC_BASE_URL=$(jq -r '."staging-public-base-url"' $THREESCALE_JSON)
+          PRODUCTION_PUBLIC_BASE_URL=$(jq -r '."production-public-base-url"' $THREESCALE_JSON)
+        fi
+
+
+        echo "Importing OpenAPI spec document $OPENAPI_SPEC_DOCUMENT"
+
+
+        COMMAND="import openapi -d $(params.toolboxCredentials) $OPENAPI_SPEC_DOCUMENT "
+
+        COMMAND+="--target_system_name=$SYSTEM_NAME "
+
+        COMMAND+="--override-private-base-url=$PRIVATE_BASE_URL "
+
+        if [ ! -z $PUBLIC_BASEPATH ];then
+          COMMAND+="--override-public-basepath=$PUBLIC_BASEPATH "
+        fi
+
+        if [ ! -z $STAGING_PUBLIC_BASE_URL ];then
+          COMMAND+="--staging-public-base-url=$STAGING_PUBLIC_BASE_URL "
+          COMMAND+="--production-public-base-url=$PRODUCTION_PUBLIC_BASE_URL "
+        fi
+
+
+        3scale $COMMAND
+
+
+        echo
+
+
+        ##### Set product name #####
+
+
+        if $(jq 'has("product-name")' $THREESCALE_JSON) && [ $(jq
+        '."product-name" | length' $THREESCALE_JSON) -gt 0 ];then
+          PRODUCT_NAME=$(jq '."product-name"' $THREESCALE_JSON)
+          echo "Setting product name to $PRODUCT_NAME"
+          3scale service apply $(params.toolboxCredentials) $SYSTEM_NAME --name=$PRODUCT_NAME
+        fi
+
+
+        echo
+
+
+        ##### Set Backend name #####
+
+
+        if $(jq 'has("backend-name")' $THREESCALE_JSON) && [ $(jq
+        '."backend-name" | length' $THREESCALE_JSON) -gt 0 ];then
+          BACKEND_NAME=$(jq -r '."backend-name"' $THREESCALE_JSON)
+          BACKEND_LIST=$(curl -s -X GET $THREESCALE_REMOTE_URL/admin/api/backend_apis.json)
+          BACKEND_ID=$(jq ".backend_apis[].backend_api | select(.system_name == \"$SYSTEM_NAME\").id" <<< $BACKEND_LIST)
+          echo "Set name of backend with id $BACKEND_ID"
+          curl -s -X PUT "$THREESCALE_REMOTE_URL/admin/api/backend_apis/$BACKEND_ID.json" -d "name=$BACKEND_NAME"
+        fi
+
+
+        echo
+
+
+        ##### Create application plans #####
+
+
+        APPLICATION_PLANS_LENGTH=$(jq '."application-plans" | length'
+        $THREESCALE_JSON)
+
+        if [ $APPLICATION_PLANS_LENGTH -gt 0 ];then
+          for k in $(jq '."application-plans" | keys | .[]' $THREESCALE_JSON); do 
+            APPLICATION_PLAN=$(jq -r ".[\"application-plans\"][$k]" $THREESCALE_JSON);
+            echo "Creating application plan with definition: "
+            echo $APPLICATION_PLAN
+            APPLICATION_PLAN_SYSTEM_NAME=$(jq -r '."system-name"' <<< "$APPLICATION_PLAN")
+            if $(jq 'has("definition")' <<< "$APPLICATION_PLAN") && [ $(jq '."definition" | length' <<< "$APPLICATION_PLAN") -gt 0 ];then
+              APPLICATION_PLAN_DEFINITION=$(jq -r '."definition"' <<< "$APPLICATION_PLAN")
+              COMMAND="application-plan import -f $(dirname $THREESCALE_JSON)/$APPLICATION_PLAN_DEFINITION -p $APPLICATION_PLAN_SYSTEM_NAME $(params.toolboxCredentials) $SYSTEM_NAME"
+              3scale $COMMAND
+            else
+              APPLICATION_PLAN_NAME=$(jq '."name"' <<< "$APPLICATION_PLAN")
+              COMMAND="application-plan apply $(params.toolboxCredentials) $SYSTEM_NAME $APPLICATION_PLAN_SYSTEM_NAME -n $APPLICATION_PLAN_NAME "
+              APPLICATION_PLAN_PUBLISH=$(jq '."publish"' <<< "$APPLICATION_PLAN")
+              if [ $(jq '."publish"' <<< "$APPLICATION_PLAN") == true ];then
+                COMMAND+="--publish "
+              fi
+              if [ $(jq '."default"' <<< "$APPLICATION_PLAN") == true ];then
+                COMMAND+="--default "
+              fi
+              3scale $COMMAND
+            fi
+          done
+        fi
+
+
+        echo
+
+
+        ##### Promote proxy config #####
+
+
+        echo "Promoting proxy config"
+
+
+        3scale proxy-config promote $(params.toolboxCredentials) $SYSTEM_NAME 
+
+
+        echo
+
+
+        ##### Create applications #####
+
+
+        APPLICATIONS_LENGTH=$(jq '."applications" | length' $THREESCALE_JSON)
+
+        if [ $APPLICATIONS_LENGTH -gt 0 ];then
+          for k in $(jq '."applications" | keys | .[]' $THREESCALE_JSON); do 
+            APPLICATION=$(jq -r ".[\"applications\"][$k]" $THREESCALE_JSON);
+            echo "Creating application with definition: "
+            echo $APPLICATION
+            APPLICATION_NAME=$(jq '."name"' <<< "$APPLICATION")
+            APPLICATION_KEY=$(jq -r '."application-key"' <<< "$APPLICATION")
+            APPLICATION_APPLICATION_PLAN=$(jq -r '."application-plan"' <<< "$APPLICATION")
+            APPLICATION_ACCOUNT=$(jq -r '."account"' <<< "$APPLICATION")
+            COMMAND="application apply $(params.toolboxCredentials) $APPLICATION_KEY --account=$APPLICATION_ACCOUNT --name=$APPLICATION_NAME \
+              --plan=$APPLICATION_APPLICATION_PLAN --service=$SYSTEM_NAME"
+            echo $COMMAND
+            3scale $COMMAND
+          done
+        fi
+
+
+        echo
+
+
+        ##### Process routes #####
+
+
+        ROUTE_TEMPLATE=$(workspaces.source.path)/$(params.openshiftRouteTemplate)
+
+
+        if $(jq 'has("staging-public-base-url")' $THREESCALE_JSON) && [ $(jq
+        '."staging-public-base-url" | length' $THREESCALE_JSON) -gt 0 ];then
+          echo "Processing apicast stage route"
+          APICAST_HOST=$(echo $STAGING_PUBLIC_BASE_URL | sed -E "s|(.*)://(.*)|\2|")
+          cat $ROUTE_TEMPLATE | jq "(.metadata.name) |=  . + \"$SYSTEM_NAME-stage\"" \
+            | jq "(.metadata.namespace) |=  . + \"$(params.apicastNamespace)\"" \
+            | jq "(.spec.host) |=  . + \"$APICAST_HOST\"" \
+            | jq "(.spec.port.targetPort) |=  . + \"$(params.apicastServicePort)\"" \
+            | jq "(.spec.to.name) |=  . + \"$(params.apicastServiceStaging)\"" \
+            > $(workspaces.source.path)/$(params.apicastStagingRouteManifest)
+          echo $SYSTEM_NAME-stage > $(results.apicastStagingRoute.path)
+        fi
+
+
+        if $(jq 'has("production-public-base-url")' $THREESCALE_JSON) && [ $(jq
+        '."production-public-base-url" | length' $THREESCALE_JSON) -gt 0 ];then
+          echo "Processing apicast production route"
+          APICAST_HOST=$(echo $PRODUCTION_PUBLIC_BASE_URL | sed -E "s|(.*)://(.*)|\2|")
+          cat $ROUTE_TEMPLATE | jq "(.metadata.name) |=  . + \"$SYSTEM_NAME-prod\"" \
+            | jq "(.metadata.namespace) |=  . + \"$(params.apicastNamespace)\"" \
+            | jq "(.spec.host) |=  . + \"$APICAST_HOST\"" \
+            | jq "(.spec.port.targetPort) |=  . + \"$(params.apicastServicePort)\"" \
+            | jq "(.spec.to.name) |=  . + \"$(params.apicastServiceProduction)\"" \
+            > $(workspaces.source.path)/$(params.apicastProductionRouteManifest)
+            echo $SYSTEM_NAME-stage > $(results.apicastProductionRoute.path)
+        fi
+      workingDir: /opt/toolbox
+  workspaces:
+    - description: source code volume with openapi spec and metadata
+      name: source
+    - description: secret containing credentials
+      mountPath: /config
+      name: toolbox-secret

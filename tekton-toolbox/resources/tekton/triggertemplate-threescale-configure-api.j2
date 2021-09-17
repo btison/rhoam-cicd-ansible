@@ -1,0 +1,52 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerTemplate
+metadata:
+  name: {{ tekton_triggertemplate_configure_api }}
+spec:
+  params:
+    - name: gitUrl
+    - name: gitRevision
+    - name: toolboxCredentials
+    - name: threescaleMetadata
+    - name: openapiSpecDocument
+    - name: openshiftRouteTemplate
+    - name: apicastNamespace
+    - name: apicastServicePort
+    - name: apicastServiceStaging
+    - name: apicastServiceProduction
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        generateName: {{ tekton_pipeline_configure_api }}-run-
+      spec:
+        params:
+          - name: gitUrl
+            value: $(tt.params.gitUrl)
+          - name: gitRevision
+            value: $(tt.params.gitRevision)
+          - name: toolboxCredentials
+            value: $(tt.params.toolboxCredentials)
+          - name: threescaleMetadata
+            value: $(tt.params.threescaleMetadata)
+          - name: openapiSpecDocument
+            value: $(tt.params.openapiSpecDocument)
+          - name: openshiftRouteTemplate
+            value: $(tt.params.openshiftRouteTemplate)
+          - name: apicastNamespace
+            value: $(tt.params.apicastNamespace)
+          - name: apicastServicePort
+            value: $(tt.params.apicastServicePort)
+          - name: apicastServiceStaging
+            value: $(tt.params.apicastServiceStaging)
+          - name: apicastServiceProduction
+            value: $(tt.params.apicastServiceProduction)
+        pipelineRef:
+          name: {{ tekton_pipeline_configure_api }}
+        workspaces:
+          - name: output
+            persistentVolumeClaim:
+              claimName: {{ pvc_tekton_pipeline_workspace }}
+          - name: toolbox-secret
+            secret:
+              secretName: {{ threescale_toolbox_secret }}

@@ -1,0 +1,38 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: {{ tekton_task_apicast_routes }}
+spec:
+  params:
+    - name: apicastStagingRouteManifest
+      type: string
+    - name: apicastProductionRouteManifest
+      type: string
+  steps:
+    - image: 'image-registry.openshift-image-registry.svc:5000/openshift/cli:latest'
+      name: oc
+      resources: {}
+      script: >
+        #!/usr/bin/env bash
+
+
+        set -e
+
+
+        # check if route manifests are present
+
+        if [[ -f
+        "$(workspaces.source.path)/$(params.apicastStagingRouteManifest)" ]] \
+          && [[ -f "$(workspaces.source.path)/$(params.apicastProductionRouteManifest)" ]];then
+          echo "Creating staging route"
+          oc apply -f "$(workspaces.source.path)/$(params.apicastStagingRouteManifest)"
+          echo
+          echo "Creating production route"
+          oc apply -f "$(workspaces.source.path)/$(params.apicastProductionRouteManifest)"
+
+        else
+          echo "Route manifests not found. Skipping task"
+        fi
+  workspaces:
+    - description: source code volume
+      name: source

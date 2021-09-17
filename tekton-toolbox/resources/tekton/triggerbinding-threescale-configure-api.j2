@@ -1,0 +1,26 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerBinding
+metadata:
+  name: {{ tekton_triggerbinding_configure_api }}
+spec:
+  params:
+    - name: gitUrl
+      value: $(body.repository.clone_url)
+    - name: gitRevision
+      value: $(body.after)
+    - name: toolboxCredentials
+      value: {{ threescale_toolbox_credentials }}
+    - name: threescaleMetadata
+      value: {{ threescale_metadata }}
+    - name: openapiSpecDocument
+      value: {{ openapi_spec_document }}
+    - name: openshiftRouteTemplate
+      value: {{ openshift_route_template }}
+    - name: apicastNamespace
+      value: {{ threescale_apicast_namespace }}
+    - name: apicastServicePort
+      value: {{ threescale_apicast_port }}
+    - name: apicastServiceStaging
+      value: {{ threescale_apicast_staging }}
+    - name: apicastServiceProduction
+      value: {{ threescale_apicast_production }}

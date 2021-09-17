@@ -1,0 +1,40 @@
+---
+
+- name: "create namespace for tekton pipelines"
+  import_role:
+    name: openshift_namespace
+  vars:
+    namespace: "{{ tekton_namespace }}"
+    namespace_description: ""
+    namespace_display_name: ""
+
+- name: "create secret for 3scale toolbox"
+  k8s:
+    state: present
+    namespace: "{{ tekton_namespace }}"
+    definition: "{{ lookup('template', resource ) | from_yaml }}"
+  vars:
+    resource: "{{ resources_dir }}/3scale-toolbox-secret.j2"
+
+- name: "create rolebinding for tekton service account in {{ threescale_apicast_namespace }} namespace"
+  k8s:
+    state: present
+    namespace: "{{ threescale_apicast_namespace }}"
+    definition: "{{ lookup('template', resource ) | from_yaml }}"
+  vars:
+    resource: "{{ resources_dir }}/tekton/rolebinding-pipeline-sa-edit.j2"
+
+- name: "create tekton resources"
+  k8s:
+    state: present
+    namespace: "{{ tekton_namespace }}"
+    definition: "{{ lookup('template', item ) | from_yaml }}"
+  loop:
+    - "{{ resources_dir }}/tekton/pvc-pipeline-workspace.j2"
+    - "{{ resources_dir }}/tekton/task-import-openapi.j2"
+    - "{{ resources_dir }}/tekton/task-apicast-routes.j2"
+    - "{{ resources_dir }}/tekton/pipeline-threescale-configure-api.j2"
+    - "{{ resources_dir }}/tekton/triggertemplate-threescale-configure-api.j2"
+    - "{{ resources_dir }}/tekton/triggerbinding-threescale-configure-api.j2"
+    - "{{ resources_dir }}/tekton/eventlistener-threescale-configure-api.j2"
+    - "{{ resources_dir }}/tekton/eventlistener-route.j2"

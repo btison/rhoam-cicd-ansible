@@ -1,0 +1,53 @@
+---
+
+- name: "delete tekton resources"
+  k8s:
+    state: absent
+    api_version: "{{ item.api_version }}"
+    kind: "{{ item.kind }}"
+    namespace: "{{ tekton_namespace }}"
+    name: "{{ item.name }}"
+  loop:
+    - api_version: route.openshift.io/v1
+      kind: route
+      name: "{{ tekton_eventlistener_configure_api_route }}"
+    - api_version: triggers.tekton.dev/v1alpha1
+      kind: eventlistener
+      name: "{{ tekton_eventlistener_configure_api }}"
+    - api_version: triggers.tekton.dev/v1alpha1
+      kind: triggerbinding
+      name: "{{ tekton_triggerbinding_configure_api }}"
+    - api_version: triggers.tekton.dev/v1alpha1
+      kind: triggertemplate
+      name: "{{ tekton_triggertemplate_configure_api }}"
+    - api_version: tekton.dev/v1beta1
+      kind: pipeline
+      name: "{{ tekton_pipeline_configure_api }}" 
+    - api_version: tekton.dev/v1beta1
+      kind: task
+      name: "{{ tekton_task_apicast_routes }}"
+    - api_version: tekton.dev/v1beta1
+      kind: task
+      name: "{{ tekton_task_import_openapi }}"
+    - api_version: v1
+      kind: persistentvolumeclaim
+      name: "{{ pvc_tekton_pipeline_workspace }}"
+    - api_version: v1
+      kind: secret
+      name: "{{ threescale_toolbox_secret }}"
+     
+- name: "delete rolebinding for tekton service account in {{ threescale_apicast_namespace }} namespace"
+  k8s:
+    state: absent
+    api_version: rbac.authorization.k8s.io/v1
+    kind: rolebinding
+    namespace: "{{ threescale_apicast_namespace }}"
+    name: "{{ rolebinding_tekton_sa_edit }}"
+
+- name: "remove {{ tekton_namespace }} namespace"
+  when: tekton_remove_namespace | default(False) | bool
+  k8s:
+    state: absent
+    api_version: v1
+    kind: namespace
+    name: "{{ tekton_namespace }}"

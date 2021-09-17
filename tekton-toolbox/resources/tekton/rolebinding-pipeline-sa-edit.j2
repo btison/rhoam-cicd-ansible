@@ -1,0 +1,12 @@
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: {{ rolebinding_tekton_sa_edit }}
+subjects:
+  - kind: ServiceAccount
+    name: pipeline
+    namespace: {{ tekton_namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edit
