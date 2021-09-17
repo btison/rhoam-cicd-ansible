@@ -1,0 +1,11 @@
+[all:vars]
+
+threescale_namespace=
+
+threescale_remove_operator_group=true
+threescale_remove_namespace=true
+
+# apicast
+threescale_apicast_subscription_channel=
+
+threescale_admin_portal_url=

@@ -1,0 +1,13 @@
+---
+
+threescale_apicast_packagemanifest: apicast-operator
+threescale_apicast_subscription_name: apicast-operator
+threescale_apicast_csv_prefix: apicast-operator
+
+threescale_apicast_automatic_installplan_approval: false
+threescale_apicast_subscription_starting_csv: ""
+
+threescale_apicast_operator_deployment: apicast-operator
+
+threescale_apicast_staging: stage
+threescale_apicast_production: prod

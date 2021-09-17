@@ -1,0 +1,83 @@
+---
+
+- name: "create namespace for 3scale apicast operator"
+  import_role:
+    name: openshift_namespace
+  vars:
+    namespace: "{{ threescale_namespace }}"
+    namespace_description: ""
+    namespace_display_name: ""
+
+- name: "create operatorgroup in {{ threescale_namespace }}"
+  import_role:
+    name: operatorgroup
+  vars:
+    operatorgroup_namespace: "{{ threescale_namespace }}"
+    operatorgroup_name: "{{ threescale_namespace }}"
+    operatorgroup_target_namespace: "{{ threescale_namespace }}"
+
+- name: "deploy apicast operator in {{ threescale_namespace }} namespace"
+  import_role:
+    name: openshift_operator
+  vars:
+    operator_name: apicast-operator
+    packagemanifest: "{{ threescale_apicast_packagemanifest }}"
+    subscription_channel: "{{ threescale_apicast_subscription_channel }}"
+    subscription_namespace: "{{ threescale_namespace }}"
+    subscription_name: "{{ threescale_apicast_subscription_name }}"
+    automatic_installplan_approval: "{{ threescale_apicast_automatic_installplan_approval }}"
+    subscription_starting_csv: "{{ threescale_apicast_subscription_starting_csv }}"
+    csv_prefix: "{{ threescale_apicast_csv_prefix }}"
+
+- name: "wait for 3scale apicast operator to be ready"
+  k8s_info:
+    api_version: v1
+    kind: Deployment
+    namespace: "{{ threescale_namespace }}"
+    name: "{{ threescale_apicast_operator_deployment }}"
+  register: r_threescale_apicast_operator_deployment
+  retries: 20
+  delay: 10
+  until:
+  - r_threescale_apicast_operator_deployment.resources is defined
+  - r_threescale_apicast_operator_deployment.resources | length | int > 0
+  - r_threescale_apicast_operator_deployment.resources[0].status.availableReplicas is defined
+  - r_threescale_apicast_operator_deployment.resources[0].status.availableReplicas | int == r_threescale_apicast_operator_deployment.resources[0].spec.replicas | int
+
+- name: "create threescale-portal-endpoint-stage secret in {{ threescale_namespace }}"
+  k8s:
+    state: present
+    namespace: "{{ threescale_namespace }}"
+    definition: "{{ lookup('template', resource ) | from_yaml }}"
+  vars:
+    resource: "{{ resources_dir }}/apicast-configuration-url-secret.j2"
+    apicast_configuration_url_secret: "{{ secret }}"
+  loop:
+    - apicast-configuration-url-secret-stage
+    - apicast-configuration-url-secret-prod
+  loop_control:
+    loop_var: secret
+
+- name: "create stage apicast"
+  k8s:
+    state: present
+    namespace: '{{ threescale_namespace }}'
+    definition: "{{ lookup('template', resource ) | from_yaml }}"
+  vars:
+    resource: "{{ resources_dir}}/apicast.j2"
+    threescale_apicast_name: "{{ threescale_apicast_staging }}"
+    threescale_apicast_configuration_url_secret: apicast-configuration-url-secret-stage
+    threescale_apicast_configuration_load_mode: lazy
+    threescale_apicast_deployment_environment: sandbox
+
+- name: "create prod apicast"
+  k8s:
+    state: present
+    namespace: '{{ threescale_namespace }}'
+    definition: "{{ lookup('template', resource ) | from_yaml }}"
+  vars:
+    resource: "{{ resources_dir}}/apicast.j2"
+    threescale_apicast_name: "{{ threescale_apicast_production }}"
+    threescale_apicast_configuration_url_secret: apicast-configuration-url-secret-prod
+    threescale_apicast_configuration_load_mode: boot
+    threescale_apicast_deployment_environment: production

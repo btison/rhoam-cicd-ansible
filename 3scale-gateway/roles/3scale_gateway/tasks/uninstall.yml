@@ -1,0 +1,62 @@
+---
+
+- name: "delete stage apicast in {{ threescale_namespace }} namespace"
+  k8s:
+    state: absent
+    api_version: apps.3scale.net/v1alpha1
+    kind: apicast
+    namespace: "{{ threescale_namespace }}"
+    name: "{{ apicast }}"
+  loop:
+    - "{{ threescale_apicast_staging }}"
+    - "{{ threescale_apicast_production }}"
+  loop_control:
+    loop_var: apicast
+
+- name: "delete prod apicast  in {{ threescale_namespace }} namespace"
+  k8s:
+    state: absent
+    api_version: apps.3scale.net/v1alpha1
+    kind: apicast
+    namespace: '{{ threescale_namespace }}'
+    name: "{{ threescale_apicast_production }}"
+
+- name: "delete threescale-portal-endpoint secrets in {{ threescale_namespace }} namespace"
+  k8s:
+    state: absent
+    api_version: v1
+    kind: secret
+    namespace: "{{ threescale_namespace }}"
+    name: "{{ secret }}"
+  loop:
+    - apicast-configuration-url-secret-stage
+    - apicast-configuration-url-secret-prod
+  loop_control:
+    loop_var: secret
+
+- name: "delete apicast operator in {{ threescale_namespace }} namespace"
+  import_role:
+    name: openshift_operator
+    tasks_from: uninstall
+  vars:
+    operator_name: apicast-operator
+    subscription_namespace: "{{ threescale_namespace }}"
+    subscription_name: "{{ threescale_apicast_subscription_name }}"
+    csv_prefix: "{{ threescale_apicast_csv_prefix }}"
+
+- name: "remove operatorgroup"
+  when: threescale_remove_operator_group | default(False) | bool
+  k8s:
+    state: absent
+    api_version: operators.coreos.com/v1
+    kind: OperatorGroup
+    name: "{{ threescale_operatorgroup }}"
+    namespace: "{{ threescale_namespace }}"
+
+- name: "remove {{ threescale_namespace }} namespace"
+  when: threescale_remove_namespace | default(False) | bool
+  k8s:
+    state: absent
+    api_version: v1
+    kind: namespace
+    name: "{{ threescale_namespace }}"
