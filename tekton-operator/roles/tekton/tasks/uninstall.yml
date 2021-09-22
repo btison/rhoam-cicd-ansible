@@ -1,0 +1,72 @@
+---
+
+- name: "delete tekton resources"
+  k8s:
+    state: absent
+    api_version: "{{ item.api_version }}"
+    kind: "{{ item.kind }}"
+    namespace: "{{ tekton_namespace }}"
+    name: "{{ item.name }}"
+  loop:
+    - api_version: route.openshift.io/v1
+      kind: route
+      name: "{{ tekton_eventlistener_configure_api_route }}"
+    - api_version: triggers.tekton.dev/v1alpha1
+      kind: eventlistener
+      name: "{{ tekton_eventlistener_configure_api }}"
+    - api_version: triggers.tekton.dev/v1alpha1
+      kind: triggerbinding
+      name: "{{ tekton_triggerbinding_configure_api }}"
+    - api_version: triggers.tekton.dev/v1alpha1
+      kind: triggertemplate
+      name: "{{ tekton_triggertemplate_configure_api }}"
+    - api_version: tekton.dev/v1beta1
+      kind: pipeline
+      name: "{{ tekton_pipeline_threescale_configure_api }}" 
+    - api_version: tekton.dev/v1beta1
+      kind: task
+      name: "{{ tekton_task_threescale_configure_api }}"
+    - api_version: v1
+      kind: persistentvolumeclaim
+      name: "{{ pvc_tekton_pipeline_workspace }}"
+    - api_version: v1
+      kind: secret
+      name: "{{ threescale_provider_account_secret }}"
+     
+- name: "delete rolebinding for tekton service account in {{ threescale_apicast_namespace }} namespace"
+  k8s:
+    state: absent
+    api_version: rbac.authorization.k8s.io/v1
+    kind: rolebinding
+    namespace: "{{ threescale_apicast_namespace }}"
+    name: "{{ rolebinding_tekton_sa_edit }}"
+
+- name: "delete 3cale operator in {{ tekton-namespace }}"
+  when: uninstall_3scale_operator | default(False) | bool
+  block:
+    - name: "delete 3cale operator in {{ tekton-namespace }}"
+      import_role:
+        name: openshift_operator
+        tasks_from: uninstall
+      vars:
+        operator_name: 3scale-operator
+        subscription_namespace: "{{ tekton_namespace }}" 
+        subscription_name: "{{ threescale_subscription_name }}"
+        csv_prefix: "{{ threescale_csv_prefix }}"
+
+    - name: "delete operatorgroup in {{ tekton_namespace }}"
+      when: delete_gitea_operatorgroup | default(False) | bool
+      import_role:
+        name: operatorgroup
+        tasks_from: uninstall
+      vars:
+        operatorgroup_namespace: "{{ tekton_namespace }}"
+        operatorgroup_name: "{{ tekton_namespace }}"
+
+- name: "remove {{ tekton_namespace }} namespace"
+  when: tekton_remove_namespace | default(False) | bool
+  k8s:
+    state: absent
+    api_version: v1
+    kind: namespace
+    name: "{{ tekton_namespace }}"

@@ -1,0 +1,195 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: {{ tekton_task_threescale_configure_api }}
+spec:
+  params:
+    - name: threescaleMetadata
+      type: string
+    - name: threescaleProviderAccountRef
+      type: string
+    - name: openshiftRouteTemplate
+      type: string
+    - name: apicastNamespace
+      type: string
+    - name: apicastServicePort
+      type: string
+    - name: apicastServiceStaging
+      type: string
+    - name: apicastServiceProduction
+      type: string
+    - name: apicastStagingRouteManifest
+      type: string
+    - name: apicastProductionRouteManifest
+      type: string
+  steps:
+    - image: 'quay.io/btison/oc-jq:4.8.0'
+      name: create-3scale-resources
+      resources: {}
+      script: |
+        #!/usr/bin/env bash
+
+        set -e
+
+        THREESCALE_JSON=$(workspaces.source.path)/$(params.threescaleMetadata)
+
+        ##### Provider Account Ref #####
+        ADMIN_URL=$(oc get secret $(params.threescaleProviderAccountRef) -o jsonpath='{.data.adminURL}' -n $(context.taskRun.namespace) | base64 -d)
+        ACCESS_TOKEN=$(oc get secret $(params.threescaleProviderAccountRef) -o jsonpath='{.data.token}' -n $(context.taskRun.namespace) | base64 -d)
+        THREESCALE_REMOTE_URL=$(echo $ADMIN_URL | sed -E "s|(.*)://(.*)|\1|")
+        THREESCALE_REMOTE_URL+="://"
+        THREESCALE_REMOTE_URL+=$ACCESS_TOKEN
+        THREESCALE_REMOTE_URL+="@"
+        THREESCALE_REMOTE_URL+=$(echo $ADMIN_URL | sed -E "s|(.*)://(.*)|\2|")
+
+        ##### Create Backend #####
+
+        echo "Creating Backend for API"
+        BACKEND_CR=$(jq -r '."backend-cr"' $THREESCALE_JSON)
+        BACKEND_CR_NAME=$(jq -r '."backend-cr-name"' $THREESCALE_JSON)
+        sed -i "s|{%raw%}{{backend-cr-name}}{%endraw%}|$BACKEND_CR_NAME|g" $(workspaces.source.path)/$BACKEND_CR
+        oc apply -f $(workspaces.source.path)/$BACKEND_CR -n $(context.taskRun.namespace)
+
+        echo
+
+        ##### Create Product #####
+
+        echo "Creating Product for API"
+        PRODUCT_CR=$(jq -r '."product-cr"' $THREESCALE_JSON)
+        PRODUCT_CR_NAME=$(jq -r '."product-cr-name"' $THREESCALE_JSON)
+        sed -i "s|{%raw%}{{product-cr-name}}{%endraw%}|$PRODUCT_CR_NAME|g" $(workspaces.source.path)/$PRODUCT_CR
+        if $(jq 'has("staging-public-base-url")' $THREESCALE_JSON) && [ $(jq '."staging-public-base-url" | length' $THREESCALE_JSON) -gt 0 ];then
+          STAGING_PUBLIC_BASE_URL=$(jq -r '."staging-public-base-url"' $THREESCALE_JSON)
+          sed -i "s|{%raw%}{{staging-public-base-url}}{%endraw%}|$STAGING_PUBLIC_BASE_URL|g" $(workspaces.source.path)/$PRODUCT_CR
+        fi
+        if $(jq 'has("production-public-base-url")' $THREESCALE_JSON) && [ $(jq '."production-public-base-url" | length' $THREESCALE_JSON) -gt 0 ];then
+          PRODUCTION_PUBLIC_BASE_URL=$(jq -r '."production-public-base-url"' $THREESCALE_JSON)
+          sed -i "s|{%raw%}{{production-public-base-url}}{%endraw%}|$PRODUCTION_PUBLIC_BASE_URL|g" $(workspaces.source.path)/$PRODUCT_CR
+        fi
+
+        oc apply -f $(workspaces.source.path)/$PRODUCT_CR -n $(context.taskRun.namespace)
+
+        echo
+
+        ##### Get Product ID #####
+        PRODUCT_CR=$(oc get product $PRODUCT_CR_NAME -o json -n $(context.taskRun.namespace) )
+        PRODUCT_SYSTEM_NAME=$(jq -r '.spec.systemName' <<< $PRODUCT_CR)
+        while [ -z "$PRODUCT_ID" ];do
+          PRODUCT_LIST=$(curl -s -X GET $THREESCALE_REMOTE_URL/admin/api/services.json)
+          PRODUCT_ID=$(jq ".services[].service | select(.system_name == \"$PRODUCT_SYSTEM_NAME\").id" <<< $PRODUCT_LIST)
+        done
+        echo "Product ID = $PRODUCT_ID"
+        echo
+
+        ##### Configure policies config #####
+
+        if $(jq 'has("policies-config")' $THREESCALE_JSON) && [ $(jq '."policies-config" | length' $THREESCALE_JSON) -gt 0 ];then
+          POLICIES_CONFIG_TEMPLATE=$(workspaces.source.path)/$(jq -r '."policies-config"' $THREESCALE_JSON)
+          echo "Processing policies config template $POLICIES_CONFIG_TEMPLATE"
+
+          if $(jq 'has("public-basepath")' $THREESCALE_JSON) && [ $(jq '."public-basepath" | length' $THREESCALE_JSON) -gt 0 ];then
+            echo "Setting public basepath" 
+              PUBLIC_BASEPATH=$(jq -r '."public-basepath"' $THREESCALE_JSON)
+              sed -i "s|{%raw%}{{public-basepath}}{%endraw%}|$PUBLIC_BASEPATH|g" $POLICIES_CONFIG_TEMPLATE
+          fi
+
+          echo "Creating policies config"
+          sleep 3s
+          CURL_RETURN_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT -d "policies_config=$(cat $POLICIES_CONFIG_TEMPLATE)" \
+            $THREESCALE_REMOTE_URL/admin/api/services/$PRODUCT_ID/proxy/policies.json)
+          if [ $CURL_RETURN_CODE -ne 200 ];then
+            echo "Curl command returned unexpected code: $CURL_RETURN_CODE"
+            exit 1
+          fi
+        fi
+
+        echo
+
+        ##### Promote to staging #####
+        echo "Deploy to staging"
+        CURL_RETURN_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST $THREESCALE_REMOTE_URL/admin/api/services/$PRODUCT_ID/proxy/deploy.json)
+        echo "Curl return code:  $CURL_RETURN_CODE"
+
+        echo
+
+        ##### Promote to production #####
+        echo "Get the latest proxy config"
+        STAGING_PROXY_VERSION=$(curl -s -X GET $THREESCALE_REMOTE_URL/admin/api/services/$PRODUCT_ID/proxy//configs/sandbox/latest.json \
+          | jq '.proxy_config.version')
+        echo "Deploy version $STAGING_PROXY_VERSION to production"
+        CURL_RETURN_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST -d "to=production" \
+                  $THREESCALE_REMOTE_URL/admin/api/services/$PRODUCT_ID/proxy/configs/sandbox/$STAGING_PROXY_VERSION/promote.json)
+        echo "Curl return code:  $CURL_RETURN_CODE"
+
+        echo
+
+        sleep 5
+
+        ##### Create applications #####
+
+        APPLICATIONS_LENGTH=$(jq '."applications" | length' $THREESCALE_JSON)
+        if [ $APPLICATIONS_LENGTH -gt 0 ];then
+          for k in $(jq '."applications" | keys | .[]' $THREESCALE_JSON); do 
+            APPLICATION=$(jq -r ".[\"applications\"][$k]" $THREESCALE_JSON);
+            APPLICATION_NAME=$(jq -r '."name"' <<< "$APPLICATION")
+            APPLICATION_KEY=$(jq -r '."application-key"' <<< "$APPLICATION")
+            APPLICATION_APPLICATION_PLAN=$(jq -r '."application-plan"' <<< "$APPLICATION")
+            APPLICATION_ACCOUNT=$(jq -r '."account"' <<< "$APPLICATION")
+
+            # Find account id
+            ACCOUNT_ID=$(curl -s -X GET $THREESCALE_REMOTE_URL/admin/api/accounts/find.json?username=$APPLICATION_ACCOUNT | jq '.account.id')
+            # Find application plan id
+            APPLICATION_PLAN_ID=$(curl -s -X GET $THREESCALE_REMOTE_URL/admin/api/services/$PRODUCT_ID/application_plans.json \
+              | jq ".plans[].application_plan | select(.system_name == \"$APPLICATION_APPLICATION_PLAN\").id")
+            # check if application already exists
+            APPLICATION_ID=$(curl -s -X GET $THREESCALE_REMOTE_URL/admin/api/accounts/$ACCOUNT_ID/applications.json \
+              | jq ".applications[].application | select(.name == \"$APPLICATION_NAME\").name")
+            if [ -z "$APPLICATION_ID" ];then
+              echo "Creating Application with service name $APPLICATION_NAME"
+              CURL_RETURN_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST $THREESCALE_REMOTE_URL/admin/api/accounts/$ACCOUNT_ID/applications.json \
+                -d "plan_id=$APPLICATION_PLAN_ID&description=$APPLICATION_NAME&name=$APPLICATION_NAME&user_key=$APPLICATION_KEY")
+              if [ $CURL_RETURN_CODE -ne 201 ];then
+                echo "Curl command returned unexpected code: $CURL_RETURN_CODE"
+                exit 1
+              fi
+            else 
+              echo "Application with service name $APPLICATION_NAME already exists"
+            fi
+
+          done
+        fi
+
+        echo
+
+        ##### Process routes #####
+
+        ROUTE_TEMPLATE=$(workspaces.source.path)/$(params.openshiftRouteTemplate)
+
+        if $(jq 'has("staging-public-base-url")' $THREESCALE_JSON) && [ $(jq '."staging-public-base-url" | length' $THREESCALE_JSON) -gt 0 ];then
+          echo "Processing apicast staging route"
+          APICAST_HOST=$(echo $STAGING_PUBLIC_BASE_URL | sed -E "s|(.*)://(.*)|\2|")
+          cat $ROUTE_TEMPLATE | jq "(.metadata.name) |=  . + \"$PRODUCT_CR_NAME-stage\"" \
+            | jq "(.metadata.namespace) |=  . + \"$(params.apicastNamespace)\"" \
+            | jq "(.spec.host) |=  . + \"$APICAST_HOST\"" \
+            | jq "(.spec.port.targetPort) |=  . + \"$(params.apicastServicePort)\"" \
+            | jq "(.spec.to.name) |=  . + \"$(params.apicastServiceStaging)\"" \
+            > $(workspaces.source.path)/$(params.apicastStagingRouteManifest)
+          echo "Creating apicast stage route"
+          oc apply -f "$(workspaces.source.path)/$(params.apicastStagingRouteManifest)"
+        fi
+
+        if $(jq 'has("production-public-base-url")' $THREESCALE_JSON) && [ $(jq '."production-public-base-url" | length' $THREESCALE_JSON) -gt 0 ];then
+          echo "Processing apicast production route"
+          APICAST_HOST=$(echo $PRODUCTION_PUBLIC_BASE_URL | sed -E "s|(.*)://(.*)|\2|")
+          cat $ROUTE_TEMPLATE | jq "(.metadata.name) |=  . + \"$PRODUCT_CR_NAME-prod\"" \
+            | jq "(.metadata.namespace) |=  . + \"$(params.apicastNamespace)\"" \
+            | jq "(.spec.host) |=  . + \"$APICAST_HOST\"" \
+            | jq "(.spec.port.targetPort) |=  . + \"$(params.apicastServicePort)\"" \
+            | jq "(.spec.to.name) |=  . + \"$(params.apicastServiceProduction)\"" \
+            > $(workspaces.source.path)/$(params.apicastProductionRouteManifest)
+          echo "Creating production route"
+          oc apply -f "$(workspaces.source.path)/$(params.apicastProductionRouteManifest)"
+        fi
+  workspaces:
+    - description: source code volume with openapi spec and metadata
+      name: source

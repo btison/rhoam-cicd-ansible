@@ -1,0 +1,16 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: EventListener
+metadata:
+  name: {{ tekton_eventlistener_configure_api }}
+spec:
+  namespaceSelector: {}
+  resources: {}
+  serviceAccountName: pipeline
+  triggers:
+    - bindings:
+        - kind: TriggerBinding
+          ref: {{ tekton_triggerbinding_configure_api }}
+      name: threescale-configure-api
+      template:
+        ref: {{ tekton_triggertemplate_configure_api }} 
+

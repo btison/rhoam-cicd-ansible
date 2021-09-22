@@ -1,0 +1,76 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: {{ tekton_pipeline_threescale_configure_api }}
+spec:
+  params:
+    - description: git url to clone
+      name: gitUrl
+      type: string
+    - description: 'git revision to checkout (branch, tag, sha, ref…)'
+      name: gitRevision
+      type: string
+    - description: 3scale metadata file name
+      name: threescaleMetadata
+      type: string
+    - description: Secret with 3scale API Manager connection details
+      name: threescaleProviderAccountRef
+      type: string
+    - description: OpenShift API Gateway Route template
+      name: openshiftRouteTemplate
+      type: string
+    - description: Namespace for Apicast gateways
+      name: apicastNamespace
+      type: string
+    - description: Apicast service proxy port
+      name: apicastServicePort
+      type: string
+    - description: Staging Apicast gateway service name
+      name: apicastServiceStaging
+      type: string
+    - description: Production Apicast gateway service name
+      name: apicastServiceProduction
+      type: string
+  tasks:
+    - name: git-clone
+      params:
+        - name: url
+          value: $(params.gitUrl)
+        - name: revision
+          value: $(params.gitRevision)
+      taskRef:
+        kind: ClusterTask
+        name: git-clone
+      workspaces:
+        - name: output
+          workspace: output
+    - name: threescale-create-resources
+      params:
+        - name: threescaleMetadata
+          value: $(params.threescaleMetadata)
+        - name: threescaleProviderAccountRef
+          value: $(params.threescaleProviderAccountRef)
+        - name: openshiftRouteTemplate
+          value: $(params.openshiftRouteTemplate)
+        - name: apicastNamespace
+          value: $(params.apicastNamespace)
+        - name: apicastServicePort
+          value: $(params.apicastServicePort)
+        - name: apicastServiceStaging
+          value: $(params.apicastServiceStaging)
+        - name: apicastServiceProduction
+          value: $(params.apicastServiceProduction)
+        - name: apicastStagingRouteManifest
+          value: apicast-staging-route.json
+        - name: apicastProductionRouteManifest
+          value: apicast-production-route.json
+      runAfter:
+        - git-clone
+      taskRef:
+        kind: Task
+        name: {{ tekton_task_threescale_configure_api }}
+      workspaces:
+        - name: source
+          workspace: output
+  workspaces:
+    - name: output

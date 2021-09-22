@@ -1,0 +1,75 @@
+---
+
+- name: "create namespace for tekton pipelines and 3scale operator"
+  import_role:
+    name: openshift_namespace
+  vars:
+    namespace: "{{ tekton_namespace }}"
+    namespace_description: ""
+    namespace_display_name: ""
+
+- name: "create operatorgroup in {{ tekton_namespace }}"
+  import_role:
+    name: operatorgroup
+  vars:
+    operatorgroup_namespace: "{{ tekton_namespace }}"
+    operatorgroup_name: "{{ tekton_namespace }}"
+    operatorgroup_target_namespace: "{{ tekton_namespace }}"
+
+- name: "deploy 3scale operator in {{ tekton_namespace }}"
+  import_role:
+    name: openshift_operator
+  vars:
+    operator_name: 3scale-operator
+    packagemanifest: "{{ threescale_packagemanifest }}"
+    subscription_channel: "{{ threescale_subscription_channel }}"
+    subscription_namespace: "{{ tekton_namespace }}" 
+    subscription_name: "{{ threescale_subscription_name }}"
+    automatic_installplan_approval: "{{ threescale_automatic_installplan_approval }}"
+    subscription_starting_csv: "{{ threescale_subscription_starting_csv }}"
+    csv_prefix: "{{ threescale_csv_prefix }}"
+
+- name: "wait for 3scale operator to be ready"
+  k8s_info:
+    api_version: v1
+    kind: Deployment
+    namespace: "{{ tekton_namespace }}"
+    name: "{{ threescale_operator_deployment }}"
+  register: r_threescale_operator_deployment
+  retries: 20
+  delay: 10
+  until:
+  - r_threescale_operator_deployment.resources is defined
+  - r_threescale_operator_deployment.resources | length | int > 0
+  - r_threescale_operator_deployment.resources[0].status.availableReplicas is defined
+  - r_threescale_operator_deployment.resources[0].status.availableReplicas | int == r_threescale_operator_deployment.resources[0].spec.replicas | int
+
+- name: "create 3scale provider account secret"
+  k8s:
+    state: present
+    namespace: "{{ tekton_namespace }}"
+    definition: "{{ lookup('template', resource ) | from_yaml }}"
+  vars:
+    resource: "{{ resources_dir }}/secret-threescale-provider-account.j2"
+
+- name: "create rolebinding for tekton service account in {{ threescale_apicast_namespace }} namespace"
+  k8s:
+    state: present
+    namespace: "{{ threescale_apicast_namespace }}"
+    definition: "{{ lookup('template', resource ) | from_yaml }}"
+  vars:
+    resource: "{{ resources_dir }}/tekton/rolebinding-pipeline-sa-edit.j2"
+
+- name: "create tekton resources"
+  k8s:
+    state: present
+    namespace: "{{ tekton_namespace }}"
+    definition: "{{ lookup('template', item ) | from_yaml }}"
+  loop:
+    - "{{ resources_dir }}/tekton/pvc-pipeline-workspace.j2"
+    - "{{ resources_dir }}/tekton/task-threescale-configure-api.j2"
+    - "{{ resources_dir }}/tekton/pipeline-threescale-configure-api.j2"
+    - "{{ resources_dir }}/tekton/triggertemplate-threescale-configure-api.j2"
+    - "{{ resources_dir }}/tekton/triggerbinding-threescale-configure-api.j2"
+    - "{{ resources_dir }}/tekton/eventlistener-threescale-configure-api.j2"
+    - "{{ resources_dir }}/tekton/eventlistener-route.j2"
