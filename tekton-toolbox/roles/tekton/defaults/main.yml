@@ -16,3 +16,7 @@ tekton_eventlistener_configure_api_route: "el-{{ tekton_eventlistener_configure_
 rolebinding_tekton_sa_edit: tekton-sa-edit
 
 threescale_toolbox_credentials: rhoam
+
+service_registry_secret: service-registry
+
+tekton_task_import_service_registry: service-registry-import-openapi

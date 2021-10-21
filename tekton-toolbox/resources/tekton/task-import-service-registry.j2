@@ -1,0 +1,77 @@
+kind: Secret
+apiVersion: v1
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: {{ tekton_task_import_service_registry }}
+spec:
+  params:
+    - name: serviceRegistryURL
+      type: string
+    - name: openapiSpecDocument
+      type: string
+    - name: serviceRegistryMetadata
+      type: string
+    - name: serviceRegistryTokenUrl
+      type: string
+  steps:
+    - name: import-openapi
+      image: quay.io/btison/oc-jq:4.8.0
+      script: |
+        #!/usr/bin/env bash
+
+        set -e
+
+        SERVICE_REGISTRY_JSON=$(workspaces.source.path)/$(params.serviceRegistryMetadata)
+
+        echo "Processing Service Registry metadata file $SERVICE_REGISTRY_JSON with contents:"
+        cat $SERVICE_REGISTRY_JSON
+
+        echo
+        echo
+
+        ##### Parse metadata #####
+
+        OPENAPI_SPEC_DOCUMENT=$(workspaces.source.path)/$(params.openapiSpecDocument)
+        ARTIFACT_ID=$(jq -r '."artifact-id"' $SERVICE_REGISTRY_JSON)
+        GROUP_ID=$(jq -r '."group-id"' $SERVICE_REGISTRY_JSON)
+        VERSION=$(jq -r '."version"' $SERVICE_REGISTRY_JSON)
+        ARTIFACT_TYPE=$(jq -r '."artifact-type"' $SERVICE_REGISTRY_JSON)
+
+        ##### Get access token for registry #####
+
+        CLIENT_ID=$(cat /etc/registry/client-id)
+        CLIENT_SECRET=$(cat /etc/registry/client-secret)
+
+        ACCESS_TOKEN=$(curl -s -X POST -d "grant_type=client_credentials&client_id=$CLIENT_ID&client_secret=$CLIENT_SECRET" \
+          $(params.serviceRegistryTokenUrl) | jq -r '.access_token')
+
+        ##### Upload openapi spec #####
+
+        CURL_RETURN_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X GET -H "Authorization: Bearer $ACCESS_TOKEN" \
+          $(params.serviceRegistryURL)/apis/registry/v2/groups/$GROUP_ID/artifacts/$ARTIFACT_ID/versions/$VERSION )
+
+        if [ $CURL_RETURN_CODE -eq 200 ];then
+          echo "Artifact [$GROUP_ID:$ARTIFACT_ID:$VERSION] already present in Service Registry"
+        elif [ $CURL_RETURN_CODE -eq 404 ];then
+          echo "Uploading artifact [$GROUP_ID:$ARTIFACT_ID:$VERSION] to Service Registry"
+          CURL_RETURN_CODE_POST=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -H "Content-Type: application/json; artifactType=$ARTIFACT_TYPE" \
+            -H "X-Registry-Version: $VERSION" -H "X-Registry-ArtifactId: $ARTIFACT_ID" \
+            -d @$OPENAPI_SPEC_DOCUMENT \
+            $(params.serviceRegistryURL)/apis/registry/v2/groups/$GROUP_ID/artifacts?ifExists=UPDATE )
+          if [ $CURL_RETURN_CODE_POST -ne 200 ];then
+            echo "Unexpected curl return code when uploading artifact: $CURL_RETURN_CODE_POST"
+            exit 1
+          fi
+         else
+          echo "Unexpected curl return code when looking for artifact: $CURL_RETURN_CODE"
+          exit 1
+        fi
+
+  workspaces:
+    - name: source
+      description: source code volume with openapi spec and metadata
+    - name: registry-secret
+      description: secret containing credentials
+      mountPath: /etc/registry

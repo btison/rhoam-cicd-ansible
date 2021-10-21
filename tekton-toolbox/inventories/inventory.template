@@ -13,3 +13,9 @@ threescale_apicast_port=
 threescale_metadata=3scale/3scale.json
 openapi_spec_document=openapi-spec.json
 openshift_route_template=openshift/route.json
+
+service_registry_client_id=
+service_registry_client_secret=
+service_registry_url=
+service_registry_token_url=
+service_registry_metadata=service-registry/service-registry.json
