@@ -23,9 +23,8 @@ spec:
     - name: apicastProductionRouteManifest
       type: string
   steps:
-    - image: 'quay.io/btison/oc-jq:4.8.0'
-      name: create-3scale-resources
-      resources: {}
+    - name: create-3scale-resources
+      image: quay.io/btison/oc-jq:4.8.0
       script: |
         #!/usr/bin/env bash
 
@@ -191,5 +190,5 @@ spec:
           oc apply -f "$(workspaces.source.path)/$(params.apicastProductionRouteManifest)"
         fi
   workspaces:
-    - description: source code volume with openapi spec and metadata
-      name: source
+    - name: source
+      description: source code volume with openapi spec and metadata

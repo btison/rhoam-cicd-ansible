@@ -21,3 +21,7 @@ tekton_triggerbinding_configure_api: threescale-configure-api
 
 tekton_eventlistener_configure_api_service: "el-{{ tekton_eventlistener_configure_api }}"
 tekton_eventlistener_configure_api_route: "el-{{ tekton_eventlistener_configure_api }}"
+
+service_registry_secret: service-registry
+
+tekton_task_import_service_registry: service-registry-import-openapi

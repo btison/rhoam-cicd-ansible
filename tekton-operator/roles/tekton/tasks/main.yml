@@ -52,6 +52,14 @@
   vars:
     resource: "{{ resources_dir }}/secret-threescale-provider-account.j2"
 
+- name: "create secret for service registry"
+  k8s:
+    state: present
+    namespace: "{{ tekton_namespace }}"
+    definition: "{{ lookup('template', resource ) | from_yaml }}"
+  vars:
+    resource: "{{ resources_dir }}/service-registry-secret.j2"
+
 - name: "create rolebinding for tekton service account in {{ threescale_apicast_namespace }} namespace"
   k8s:
     state: present
@@ -68,6 +76,7 @@
   loop:
     - "{{ resources_dir }}/tekton/pvc-pipeline-workspace.j2"
     - "{{ resources_dir }}/tekton/task-threescale-configure-api.j2"
+    - "{{ resources_dir }}/tekton/task-service-registry-import-openapi.j2"
     - "{{ resources_dir }}/tekton/pipeline-threescale-configure-api.j2"
     - "{{ resources_dir }}/tekton/triggertemplate-threescale-configure-api.j2"
     - "{{ resources_dir }}/tekton/triggerbinding-threescale-configure-api.j2"

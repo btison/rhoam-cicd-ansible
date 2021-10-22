@@ -13,6 +13,10 @@ spec:
     - name: apicastServicePort
     - name: apicastServiceStaging
     - name: apicastServiceProduction
+    - name: openapiSpecDocument
+    - name: serviceRegistryMetadata
+    - name: serviceRegistryURL
+    - name: serviceRegistryTokenUrl
   resourcetemplates:
     - apiVersion: tekton.dev/v1beta1
       kind: PipelineRun
@@ -38,9 +42,21 @@ spec:
             value: $(tt.params.apicastServiceStaging)
           - name: apicastServiceProduction
             value: $(tt.params.apicastServiceProduction)
+          - name: openapiSpecDocument
+            value: $(tt.params.openapiSpecDocument)
+          - name: serviceRegistryURL
+            value: $(tt.params.serviceRegistryURL)
+          - name: serviceRegistryMetadata
+            value: $(tt.params.serviceRegistryMetadata)
+          - name: serviceRegistryTokenUrl
+            value: $(tt.params.serviceRegistryTokenUrl)
         pipelineRef:
           name: {{ tekton_pipeline_threescale_configure_api }}
         workspaces:
           - name: output
             persistentVolumeClaim:
               claimName: {{ pvc_tekton_pipeline_workspace }}
+          - name: registry-secret
+            secret:
+              secretName: {{ service_registry_secret }}
+

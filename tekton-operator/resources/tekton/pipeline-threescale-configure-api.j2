@@ -4,32 +4,44 @@ metadata:
   name: {{ tekton_pipeline_threescale_configure_api }}
 spec:
   params:
-    - description: git url to clone
-      name: gitUrl
+    - name: gitUrl
+      description: git url to clone
       type: string
-    - description: 'git revision to checkout (branch, tag, sha, ref…)'
-      name: gitRevision
+    - name: gitRevision
+      description: 'git revision to checkout (branch, tag, sha, ref…)'
       type: string
-    - description: 3scale metadata file name
-      name: threescaleMetadata
+    - name: threescaleMetadata
+      description: 3scale metadata file name
       type: string
-    - description: Secret with 3scale API Manager connection details
-      name: threescaleProviderAccountRef
+    - name: threescaleProviderAccountRef
+      description: Secret with 3scale API Manager connection details
       type: string
-    - description: OpenShift API Gateway Route template
-      name: openshiftRouteTemplate
+    - name: openshiftRouteTemplate
+      description: OpenShift API Gateway Route template
       type: string
-    - description: Namespace for Apicast gateways
-      name: apicastNamespace
+    - name: apicastNamespace
+      description: Namespace for Apicast gateways 
       type: string
-    - description: Apicast service proxy port
-      name: apicastServicePort
+    - name: apicastServicePort
+      description: Apicast service proxy port
       type: string
-    - description: Staging Apicast gateway service name
-      name: apicastServiceStaging
+    - name: apicastServiceStaging
+      description: Staging Apicast gateway service name 
       type: string
-    - description: Production Apicast gateway service name
-      name: apicastServiceProduction
+    - name: apicastServiceProduction
+      description: Production Apicast gateway service name
+      type: string
+    - name: openapiSpecDocument
+      description: OpenAPI Spec Document
+      type: string
+    - name: serviceRegistryURL
+      description: Service Registry URL
+      type: string
+    - name: serviceRegistryMetadata
+      description: Service Registry metadata file name
+      type: string
+    - name: serviceRegistryTokenUrl
+      description: Service Registry Token Endpoint URL
       type: string
   tasks:
     - name: git-clone
@@ -72,5 +84,26 @@ spec:
       workspaces:
         - name: source
           workspace: output
+    - name: service-registry-import-openapi
+      params:
+        - name: serviceRegistryURL
+          value: $(params.serviceRegistryURL)
+        - name: openapiSpecDocument
+          value: $(params.openapiSpecDocument)
+        - name: serviceRegistryMetadata
+          value: $(params.serviceRegistryMetadata)
+        - name: serviceRegistryTokenUrl
+          value: $(params.serviceRegistryTokenUrl)
+      runAfter:
+        - git-clone
+      taskRef:
+        kind: Task
+        name: {{ tekton_task_import_service_registry }}
+      workspaces:
+        - name: source
+          workspace: output
+        - name: registry-secret
+          workspace: registry-secret
   workspaces:
     - name: output
+    - name: registry-secret
