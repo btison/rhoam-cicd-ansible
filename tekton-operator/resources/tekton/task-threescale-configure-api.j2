@@ -8,6 +8,8 @@ spec:
       type: string
     - name: threescaleProviderAccountRef
       type: string
+    - name: openapiSpecDocument
+      type: string
     - name: openshiftRouteTemplate
       type: string
     - name: apicastNamespace
@@ -96,6 +98,36 @@ spec:
           sleep 3s
           CURL_RETURN_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT -d "policies_config=$(cat $POLICIES_CONFIG_TEMPLATE)" \
             $THREESCALE_REMOTE_URL/admin/api/services/$PRODUCT_ID/proxy/policies.json)
+          if [ $CURL_RETURN_CODE -ne 200 ];then
+            echo "Curl command returned unexpected code: $CURL_RETURN_CODE"
+            exit 1
+          fi
+        fi
+
+        echo
+
+        ##### Create or update ActiveDocs 
+        OPENAPI_SPEC_DOCUMENT=$(workspaces.source.path)/$(params.openapiSpecDocument)
+        OPENAPI_SPEC_VERSION=$(cat $OPENAPI_SPEC_DOCUMENT | jq -r '.info.version')
+
+        ACTIVEDOCS_LIST=$(curl -s -X GET $THREESCALE_REMOTE_URL/admin/api/active_docs.json)
+        ACTIVEDOC=$(jq ".api_docs[].api_doc | select(.service_id == $PRODUCT_ID)" <<< $ACTIVEDOCS_LIST)
+
+        if [ -z "$ACTIVEDOC" ];then
+          echo "Creating ActiveDoc from OpenAPI spec"
+          OPENAPI_SPEC_NAME=$(cat $OPENAPI_SPEC_DOCUMENT | jq -r '.info.title')
+          ACTIVEDOC_NAME=$(echo $OPENAPI_SPEC_NAME | jq -Rr @uri)
+          CURL_RETURN_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST $THREESCALE_REMOTE_URL/admin/api/active_docs.json \
+            -d "name=$ACTIVEDOC_NAME&system_name=$PRODUCT_SYSTEM_NAME&service_id=$PRODUCT_ID&published=true&body=$(cat $OPENAPI_SPEC_DOCUMENT)")
+          if [ $CURL_RETURN_CODE -ne 201 ];then
+            echo "Curl command returned unexpected code: $CURL_RETURN_CODE"
+            exit 1
+          fi
+        else
+          echo "Updating ActiveDoc from OpenAPI spec"
+          ACTIVEDOC_ID=$(jq ".id" <<< $ACTIVEDOC)
+          CURL_RETURN_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT $THREESCALE_REMOTE_URL/admin/api/active_docs/$ACTIVEDOC_ID.json \
+            -d "body=$(cat $OPENAPI_SPEC_DOCUMENT)")
           if [ $CURL_RETURN_CODE -ne 200 ];then
             echo "Curl command returned unexpected code: $CURL_RETURN_CODE"
             exit 1
