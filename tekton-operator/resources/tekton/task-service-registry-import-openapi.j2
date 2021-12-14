@@ -33,7 +33,7 @@ spec:
         OPENAPI_SPEC_DOCUMENT=$(workspaces.source.path)/$(params.openapiSpecDocument)
         ARTIFACT_ID=$(jq -r '."artifact-id"' $SERVICE_REGISTRY_JSON)
         GROUP_ID=$(jq -r '."group-id"' $SERVICE_REGISTRY_JSON)
-        VERSION=$(jq -r '."version"' $SERVICE_REGISTRY_JSON)
+        VERSION=$(cat $OPENAPI_SPEC_DOCUMENT | jq -r '.info.version')
         ARTIFACT_TYPE=$(jq -r '."artifact-type"' $SERVICE_REGISTRY_JSON)
 
         ##### Get access token for registry #####
